@@ -1,4 +1,4 @@
-﻿// src/pages/ReportesBIPage.jsx
+// src/pages/ReportesBIPage.jsx
 import React, { useEffect, useMemo, useState } from 'react';
 import { Sidebar } from '../components/Layout/Sidebar';
 import { Header } from '../components/Layout/Header';
@@ -54,22 +54,25 @@ export default function ReportesBIPage({ user }) {
 
   useEffect(() => {
     api
-      .get('/especialidades/')
-      .then(({ data }) =>
-        setEspecialidadesCatalogo(
-          (data || []).map((item) => item.nombre).filter(Boolean)
-        )
-      )
+      .get('/especialidades/disponibles')
+      .then(({ data }) => {
+        const nombres = Array.isArray(data) ? data.filter(Boolean) : [];
+        if (!nombres.length) {
+          throw new Error('Sin especialidades');
+        }
+        setEspecialidadesCatalogo(nombres);
+      })
       .catch(() =>
         setEspecialidadesCatalogo([
-          'CirugÃ­a',
+          'Sin especialidad',
+          'Cirugía',
           'Laboratorio',
           'Urgencias',
           'Medicina Interna',
-          'PediatrÃ­a',
-          'GinecologÃ­a',
+          'Pediatría',
+          'Ginecología',
           'Farmacia',
-          'EstÃ©ril',
+          'Estéril',
           'General',
         ])
       );
@@ -79,11 +82,15 @@ export default function ReportesBIPage({ user }) {
     setLoading(true);
     setError('');
     try {
+      const params = {
+        fecha_inicio: range.Inicio,
+        fecha_fin: range.Fin,
+      };
+      if (especialidadFiltro) {
+        params.especialidad = especialidadFiltro;
+      }
       const { data } = await api.get('/reportes/consumo-por-especialidad', {
-        params: {
-          fecha_Inicio: range.Inicio,
-          fecha_Fin: range.Fin,
-        },
+        params,
       });
       setPayload(data);
     } catch (err) {

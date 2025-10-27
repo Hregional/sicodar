@@ -17,7 +17,16 @@ export default function AuditoriaPage({ user }) {
     const fetchAuditoria = async () => {
       try {
         const res = await api.get('/auditoria?limit=2000');
-        setAuditoria(res.data?.records || []);
+        const records = Array.isArray(res.data?.records) ? res.data.records : [];
+        records.sort((a, b) => {
+          const fechaA = a.fecha ? new Date(a.fecha) : new Date(0);
+          const fechaB = b.fecha ? new Date(b.fecha) : new Date(0);
+          if (fechaA.getTime() === fechaB.getTime()) {
+            return (b.id || 0) - (a.id || 0);
+          }
+          return fechaB - fechaA;
+        });
+        setAuditoria(records);
       } catch (error) {
         console.error('Error al cargar auditoría:', error);
       } finally {

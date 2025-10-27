@@ -10,7 +10,7 @@ class Usuario(Base):
     nombre = Column(String(100), nullable=False)
     email = Column(String(100), unique=True, nullable=False)
     password_hash = Column(String(255), nullable=False)
-    rol = Column(Enum('admin', 'empleado'), default='empleado')
+    rol = Column(Enum('admin', 'empleado', 'super_admin'), default='empleado')
     created_at = Column(TIMESTAMP, server_default=func.now())
 
 class Especialidad(Base):  # ✅ NUEVA TABLA

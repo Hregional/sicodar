@@ -1,4 +1,4 @@
-﻿// src/pages/FacturasPage.jsx
+ï»¿// src/pages/FacturasPage.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { Sidebar } from "../components/Layout/Sidebar";
 import { Header } from "../components/Layout/Header";
@@ -142,12 +142,10 @@ export default function FacturasPage({ user }) {
                     <td className="px-6 py-4 whitespace-nowrap">
                       {factura.fecha
                         ? new Date(factura.fecha).toLocaleDateString("es-ES")
-                        : "—"}
+                        : "â"}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      {factura.insumo?.nombre ||
-                        factura.insumo_nombre ||
-                        "—"}
+                      {factura.insumo?.nombre || factura.insumo_nombre || "â"}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right">
                       {numberFormatter.format(factura.cantidad || 0)}
@@ -156,12 +154,12 @@ export default function FacturasPage({ user }) {
                       {currencyGT.format(factura.precio_unitario || 0)}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      {factura.numero_referencia || "—"}
+                      {factura.numero_referencia || "â"}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       {factura.proveedor ||
                         factura.remitente_destinatario ||
-                        "—"}
+                        "â"}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-center">
                       <button
@@ -246,15 +244,10 @@ export default function FacturasPage({ user }) {
             </div>
             <div className="space-y-4 px-6 py-5 text-sm text-slate-600">
               <div className="grid grid-cols-2 gap-3">
-                <p><strong>Fecha:</strong> {preview.fecha ? new Date(preview.fecha).toLocaleDateString('es-ES') : '—'}</p>
-                <p><strong>Referencia:</strong> {preview.numero_referencia || '—'}</p>
-                <p>
-                  <strong>Insumo:</strong>{" "}
-                  {preview.insumo?.nombre ||
-                    preview.insumo_nombre ||
-                    "—"}
-                </p>
-                <p><strong>Proveedor:</strong> {preview.proveedor || preview.remitente_destinatario || '—'}</p>
+                <p><strong>Fecha:</strong> {preview.fecha ? new Date(preview.fecha).toLocaleDateString('es-ES') : 'â'}</p>
+                <p><strong>Referencia:</strong> {preview.numero_referencia || 'â'}</p>
+                <p><strong>Insumo:</strong> {preview.insumo?.nombre || preview.insumo_nombre || "â"}</p>
+                <p><strong>Proveedor:</strong> {preview.proveedor || preview.remitente_destinatario || 'â'}</p>
                 <p><strong>Cantidad:</strong> {numberFormatter.format(preview.cantidad || 0)}</p>
                 <p><strong>Precio unitario:</strong> {currencyGT.format(preview.precio_unitario || 0)}</p>
               </div>
@@ -273,6 +266,7 @@ export default function FacturasPage({ user }) {
     </div>
   );
 }
+
 
 
 

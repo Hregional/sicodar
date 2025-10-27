@@ -57,6 +57,6 @@ async def get_current_user(db = Depends(database.get_db), token: str = Depends(o
     return user
 
 async def get_current_admin_user(current_user: models.Usuario = Depends(get_current_user)):
-    if current_user.rol != "admin":
+    if current_user.rol not in {"admin", "super_admin"}:
         raise HTTPException(status_code=403, detail="Not enough permissions")
     return current_user

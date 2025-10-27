@@ -23,6 +23,12 @@ export default function AlertasPage({ user }) {
     fetchAlertas();
   }, []);
 
+  const getNombreInsumo = (alerta) =>
+    alerta.insumo_nombre ||
+    alerta.insumo?.nombre ||
+    alerta.detalle?.split?.(':')?.[1]?.trim?.() ||
+    'Insumo sin nombre';
+
   return (
     <div className="flex">
       <Sidebar user={user} />
@@ -37,8 +43,11 @@ export default function AlertasPage({ user }) {
           ) : (
             <div className="space-y-4">
               {alertas.map((alerta) => (
-                <div key={alerta.id} className="p-4 border-l-4 border-yellow-500 bg-yellow-50">
-                  <p className="font-medium">{alerta.mensaje}</p>
+                <div key={alerta.id} className="rounded-xl border border-yellow-200 bg-yellow-50/70 p-4">
+                  <p className="text-sm font-semibold text-yellow-900">
+                    {getNombreInsumo(alerta)}
+                  </p>
+                  <p className="text-sm text-slate-700 mt-1">{alerta.mensaje}</p>
                   <p className="text-sm text-gray-600 mt-1">
                     {new Date(alerta.fecha).toLocaleDateString('es-ES')}
                   </p>

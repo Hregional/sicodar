@@ -19,7 +19,7 @@ const initialForm = {
   descripcion: '',
   unidad_medida: '',
   stock_minimo: '',
-  especialidad: '',
+  especialidad_id: '',
 }
 
 const numberFormatter = new Intl.NumberFormat('es-GT', {
@@ -28,14 +28,6 @@ const numberFormatter = new Intl.NumberFormat('es-GT', {
 })
 
 const isAdminRole = (rol) => ['admin', 'super_admin'].includes(rol)
-
-const normalizeEspecialidad = (value) => {
-  if (!value) return ''
-  if (typeof value === 'string') return value
-  if (Array.isArray(value)) return normalizeEspecialidad(value[0])
-  if (typeof value === 'object') return value.nombre || value.descripcion || value.id || ''
-  return String(value)
-}
 
 export default function InsumosPage({ user }) {
   const [insumos, setInsumos] = useState([])
@@ -50,6 +42,22 @@ export default function InsumosPage({ user }) {
   const navigate = useNavigate()
 
   const isAdmin = isAdminRole(user?.rol)
+
+  const especialidadesMap = useMemo(() => {
+    const map = {}
+    especialidades.forEach((esp) => {
+      map[esp.id] = esp.nombre
+    })
+    return map
+  }, [especialidades])
+
+  const getEspecialidadNombre = (insumo) => {
+    if (insumo?.especialidad?.nombre) return insumo.especialidad.nombre
+    if (insumo?.especialidad_id && especialidadesMap[insumo.especialidad_id]) {
+      return especialidadesMap[insumo.especialidad_id]
+    }
+    return 'Sin especialidad'
+  }
 
   useEffect(() => {
     const loadData = async () => {
@@ -100,10 +108,14 @@ export default function InsumosPage({ user }) {
     setError('')
     setSuccess('')
 
+    const parsedEspecialidadId = formData.especialidad_id
+      ? Number(formData.especialidad_id)
+      : null
+
     const payload = {
       ...formData,
       stock_minimo: formData.stock_minimo ? Number(formData.stock_minimo) : undefined,
-      especialidad: formData.especialidad,
+      especialidad_id: Number.isNaN(parsedEspecialidadId) ? null : parsedEspecialidadId,
     }
 
     try {
@@ -138,12 +150,16 @@ export default function InsumosPage({ user }) {
 
   const startEdit = (insumo) => {
     setEditingInsumo(insumo)
+    const especialidadId =
+      insumo.especialidad_id ??
+      insumo.especialidad?.id ??
+      ''
     setFormData({
       nombre: insumo.nombre || '',
       descripcion: insumo.descripcion || '',
       unidad_medida: insumo.unidad_medida || '',
       stock_minimo: insumo.stock_minimo ?? '',
-      especialidad: normalizeEspecialidad(insumo.especialidad),
+      especialidad_id: especialidadId ? String(especialidadId) : '',
     })
     setShowForm(true)
     setError('')
@@ -154,7 +170,7 @@ export default function InsumosPage({ user }) {
     const term = search.trim().toLowerCase()
     if (!term) return insumos
     return insumos.filter((insumo) =>
-      [insumo.nombre, insumo.descripcion, normalizeEspecialidad(insumo.especialidad)]
+      [insumo.nombre, insumo.descripcion, getEspecialidadNombre(insumo)]
         .filter(Boolean)
         .some((value) => value.toLowerCase().includes(term))
     )
@@ -261,13 +277,13 @@ export default function InsumosPage({ user }) {
                   <div>
                     <label className="mb-2 block text-sm font-semibold text-slate-700">Especialidad</label>
                     <select
-                      value={formData.especialidad}
-                      onChange={(e) => setFormData({ ...formData, especialidad: e.target.value })}
+                      value={formData.especialidad_id}
+                      onChange={(e) => setFormData({ ...formData, especialidad_id: e.target.value })}
                       className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-400"
                     >
                       <option value="">Selecciona una especialidad</option>
                       {especialidades.map((esp) => (
-                        <option key={esp.id} value={esp.nombre}>
+                        <option key={esp.id} value={esp.id}>
                           {esp.nombre}
                         </option>
                       ))}
@@ -326,13 +342,21 @@ export default function InsumosPage({ user }) {
                           {insumo.nombre}
                         </td>
                         <td className="px-4 py-3 text-slate-600">
-                          {normalizeEspecialidad(insumo.especialidad) || 'Sin especialidad'}
+                          {getEspecialidadNombre(insumo)}
                         </td>
                         <td className="px-4 py-3 text-slate-600">
                           {insumo.unidad_medida || 'Unidad'}
                         </td>
                         <td className="px-4 py-3 text-right text-slate-600">
-                          {numberFormatter.format(insumo.stock_actual || 0)}
+                          <span
+                            className={`inline-flex min-w-[64px] justify-center rounded-full px-3 py-1 text-xs font-semibold ${
+                              (insumo.stock_actual || 0) >= (insumo.stock_minimo || 0)
+                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                : 'bg-red-50 text-red-600 border border-red-200'
+                            }`}
+                          >
+                            {numberFormatter.format(insumo.stock_actual || 0)}
+                          </span>
                         </td>
                         <td className="px-4 py-3 text-right text-slate-600">
                           {numberFormatter.format(insumo.stock_minimo || 0)}
@@ -381,3 +405,5 @@ export default function InsumosPage({ user }) {
     </div>
   )
 }
+
+

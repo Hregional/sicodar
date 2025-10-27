@@ -1,16 +1,21 @@
-# main.py
+﻿# main.py
 from fastapi import FastAPI, Depends, HTTPException, status, Response
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func 
+from sqlalchemy.exc import SQLAlchemyError
 from fastapi.middleware.cors import CORSMiddleware
 from datetime import timedelta, date
 from typing import Optional
+from decimal import Decimal
+from collections import defaultdict
 import models
 import schemas
 import crud
 import auth
 import database
+
+DEFAULT_ESPECIALIDADES = ['Cirugía','Laboratorio','Urgencias','Medicina Interna','Pediatría','Ginecología','Farmacia','Estéril','General']
 
 app = FastAPI(title="HIS-Bodega", description="Sistema de Gestión de Inventario")
 
@@ -25,6 +30,26 @@ app.add_middleware(
 
 # Crear tablas
 models.Base.metadata.create_all(bind=database.engine)
+
+def sync_insumo_stock(db: Session, insumo: models.Insumo) -> float:
+    entradas_total = (
+        db.query(func.coalesce(func.sum(models.Entrada.cantidad), 0))
+        .filter(models.Entrada.insumo_id == insumo.id)
+        .scalar()
+        or 0
+    )
+    salidas_total = (
+        db.query(func.coalesce(func.sum(models.Salida.cantidad), 0))
+        .filter(models.Salida.insumo_id == insumo.id)
+        .scalar()
+        or 0
+    )
+    stock_calculado = float(Decimal(str(entradas_total)) - Decimal(str(salidas_total)))
+    stock_actual = float(insumo.stock_actual or 0)
+    if abs(stock_actual - stock_calculado) > 1e-6:
+        insumo.stock_actual = stock_calculado
+        db.add(insumo)
+    return stock_calculado
 
 def registrar_auditoria(db, usuario_id, accion, detalle="", ip_address=""):
     auditoria = models.Auditoria(
@@ -72,16 +97,35 @@ def create_insumo(insumo: schemas.InsumoCreate, current_user: schemas.Usuario = 
 # ✅ ENDPOINT ACTUALIZADO: Incluye la especialidad
 @app.get("/insumos/", response_model=list[schemas.Insumo])
 def read_insumos(skip: int = 0, limit: int = 100, db: Session = Depends(database.get_db)):
-    # Usar joinedload para incluir la relación con especialidad
-    insumos = db.query(models.Insumo).options(joinedload(models.Insumo.especialidad)).offset(skip).limit(limit).all()
+    insumos = (
+        db.query(models.Insumo)
+        .options(joinedload(models.Insumo.especialidad))
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+    updated = False
+    for insumo in insumos:
+        calculado = sync_insumo_stock(db, insumo)
+        if float(insumo.stock_actual or 0) != calculado:
+            updated = True
+    if updated:
+        db.commit()
     return insumos
 
 @app.get("/insumos/{insumo_id}", response_model=schemas.Insumo)
 def read_insumo(insumo_id: int, db: Session = Depends(database.get_db)):
-    # ✅ También actualizar el endpoint individual
-    db_insumo = db.query(models.Insumo).options(joinedload(models.Insumo.especialidad)).filter(models.Insumo.id == insumo_id).first()
+    db_insumo = (
+        db.query(models.Insumo)
+        .options(joinedload(models.Insumo.especialidad))
+        .filter(models.Insumo.id == insumo_id)
+        .first()
+    )
     if db_insumo is None:
         raise HTTPException(status_code=404, detail="Insumo not found")
+    calculado = sync_insumo_stock(db, db_insumo)
+    if float(db_insumo.stock_actual or 0) != calculado:
+        db.commit()
     return db_insumo
 
 @app.put("/insumos/{insumo_id}", response_model=schemas.Insumo)
@@ -105,7 +149,19 @@ def delete_insumo(insumo_id: int, current_user: schemas.Usuario = Depends(auth.g
 def create_entrada(entrada: schemas.EntradaCreate, current_user: schemas.Usuario = Depends(auth.get_current_user), db: Session = Depends(database.get_db)):
     if entrada.usuario_id is None:
         entrada.usuario_id = current_user.id
-    db_entrada = crud.create_entrada(db=db, entrada=entrada)
+    insumo = db.query(models.Insumo).filter(models.Insumo.id == entrada.insumo_id).first()
+    if not insumo:
+        raise HTTPException(status_code=404, detail="Insumo no encontrado para registrar la entrada.")
+    cantidad_decimal = Decimal(str(entrada.cantidad))
+    stock_actual_decimal = Decimal(str(insumo.stock_actual or 0))
+    insumo.stock_actual = stock_actual_decimal + cantidad_decimal
+    try:
+        db_entrada = crud.create_entrada(db=db, entrada=entrada)
+        db.commit()
+        db.refresh(db_entrada)
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error registrando la entrada: {str(exc)}")
     registrar_auditoria(db, current_user.id, "REGISTRAR ENTRADA", f"Insumo ID: {entrada.insumo_id}, Cantidad: {entrada.cantidad}")
     return db_entrada
 
@@ -130,11 +186,21 @@ def create_salida(salida: schemas.SalidaCreate, current_user: schemas.Usuario = 
     insumo = db.query(models.Insumo).filter(models.Insumo.id == salida.insumo_id).first()
     if not insumo:
         raise HTTPException(status_code=404, detail="Insumo no encontrado")
-    
-    if insumo.stock_actual < salida.cantidad:
-        raise HTTPException(status_code=400, detail=f"Stock insuficiente. Stock disponible: {insumo.stock_actual}, solicitado: {salida.cantidad}")
-    
-    db_salida = crud.create_salida(db=db, salida=salida)
+    stock_actual_decimal = Decimal(str(insumo.stock_actual or 0))
+    cantidad_decimal = Decimal(str(salida.cantidad))
+    if stock_actual_decimal < cantidad_decimal:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Stock insuficiente. Stock disponible: {float(stock_actual_decimal)}, solicitado: {float(cantidad_decimal)}"
+        )
+    insumo.stock_actual = stock_actual_decimal - cantidad_decimal
+    try:
+        db_salida = crud.create_salida(db=db, salida=salida)
+        db.commit()
+        db.refresh(db_salida)
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error registrando la salida: {str(exc)}")
     registrar_auditoria(db, current_user.id, "REGISTRAR SALIDA", f"Insumo ID: {salida.insumo_id}, Cantidad: {salida.cantidad}")
     return db_salida
 
@@ -162,6 +228,7 @@ def read_alertas(skip: int = 0, limit: int = 100, db: Session = Depends(database
                 # Alerta de stock bajo: válido si stock_actual < stock_minimo
                 if insumo.stock_actual < insumo.stock_minimo and insumo.stock_minimo > 0:
                     alerta.insumo = insumo  # Añadir el objeto insumo completo
+                    alerta.insumo_nombre = insumo.nombre
                     alertas_validas.append(alerta)
             elif alerta.mensaje.startswith("Insumo vence pronto"):
                 # Alerta de vencimiento: válido si la fecha de vencimiento está en el futuro
@@ -172,6 +239,7 @@ def read_alertas(skip: int = 0, limit: int = 100, db: Session = Depends(database
                     from datetime import date
                     if date.today() <= date.fromisoformat(fecha_vencimiento):
                         alerta.insumo = insumo  # Añadir el objeto insumo completo
+                        alerta.insumo_nombre = insumo.nombre
                         alertas_validas.append(alerta)
     
     return alertas_validas
@@ -208,64 +276,103 @@ def generate_automatic_alerts(db: Session = Depends(database.get_db)):
 # Kardex
 @app.get("/kardex/{insumo_id}", response_model=dict)
 def get_kardex(insumo_id: int, db: Session = Depends(database.get_db)):
-    """Obtiene el kardex de un insumo con cálculos de valor total"""
-    entradas = db.query(models.Entrada).filter(models.Entrada.insumo_id == insumo_id).all()
-    salidas = db.query(models.Salida).filter(models.Salida.insumo_id == insumo_id).all()
-    
+    """Obtiene el kardex de un insumo con cálculos de valor total y consistencia de saldos."""
+    insumo = db.query(models.Insumo).filter(models.Insumo.id == insumo_id).first()
+    if not insumo:
+        raise HTTPException(status_code=404, detail="Insumo no encontrado")
+
+    entradas = (
+        db.query(models.Entrada)
+        .filter(models.Entrada.insumo_id == insumo_id)
+        .order_by(models.Entrada.fecha, models.Entrada.id)
+        .all()
+    )
+    salidas = (
+        db.query(models.Salida)
+        .filter(models.Salida.insumo_id == insumo_id)
+        .order_by(models.Salida.fecha, models.Salida.id)
+        .all()
+    )
+
     movimientos = []
     for e in entradas:
-        movimientos.append({
-            "tipo": "ENTRADA",
-            "fecha": e.fecha,
-            "cantidad": float(e.cantidad),
-            "precio_unitario": float(e.precio_unitario) if e.precio_unitario else 0.0,
-            "precio_total": float(e.cantidad * e.precio_unitario) if e.precio_unitario else 0.0,
-            "numero_referencia": e.numero_referencia,
-            "remitente_destinatario": e.remitente_destinatario,
-            "numero_lote": e.numero_lote,
-            "fecha_vencimiento": e.fecha_vencimiento,
-            "usuario_id": e.usuario_id
-        })
+        movimientos.append(
+            {
+                "id": e.id,
+                "tipo": "ENTRADA",
+                "fecha": e.fecha,
+                "cantidad": float(e.cantidad),
+                "precio_unitario": float(e.precio_unitario) if e.precio_unitario else 0.0,
+                "precio_total": float(e.cantidad * e.precio_unitario) if e.precio_unitario else 0.0,
+                "numero_referencia": e.numero_referencia,
+                "remitente_destinatario": e.remitente_destinatario,
+                "numero_lote": e.numero_lote,
+                "fecha_vencimiento": e.fecha_vencimiento,
+                "usuario_id": e.usuario_id,
+                "created_at": e.created_at,
+            }
+        )
     for s in salidas:
-        movimientos.append({
-            "tipo": "SALIDA",
-            "fecha": s.fecha,
-            "cantidad": float(s.cantidad),
-            "precio_unitario": float(s.precio_unitario) if s.precio_unitario else 0.0,
-            "precio_total": float(s.cantidad * s.precio_unitario) if s.precio_unitario else 0.0,
-            "numero_referencia": s.numero_referencia,
-            "remitente_destinatario": s.remitente_destinatario,
-            "numero_lote": None,
-            "fecha_vencimiento": None,
-            "usuario_id": s.usuario_id
-        })
-    
-    # Ordenar por fecha
-    movimientos.sort(key=lambda x: x["fecha"])
-    
-    # Calcular el stock actual y el valor total
-    stock_actual = 0
+        movimientos.append(
+            {
+                "id": s.id,
+                "tipo": "SALIDA",
+                "fecha": s.fecha,
+                "cantidad": float(s.cantidad),
+                "precio_unitario": float(s.precio_unitario) if s.precio_unitario else 0.0,
+                "precio_total": float(s.cantidad * s.precio_unitario) if s.precio_unitario else 0.0,
+                "numero_referencia": s.numero_referencia,
+                "remitente_destinatario": s.remitente_destinatario,
+                "numero_lote": s.numero_lote,
+                "fecha_vencimiento": s.fecha_vencimiento,
+                "usuario_id": s.usuario_id,
+                "created_at": s.created_at,
+            }
+        )
+
+    # Ordenar por fecha y, en caso de empate, por el identificador para mantener consistencia cronológica
+    movimientos.sort(key=lambda x: (x["fecha"], x.get("id", 0)))
+
+    # Calcular el stock acumulado basado en movimientos
+    stock_calculado = 0.0
+    ultimo_precio_unitario = 0.0
     for mov in movimientos:
         if mov["tipo"] == "ENTRADA":
-            stock_actual += mov["cantidad"]
+            stock_calculado += mov["cantidad"]
         elif mov["tipo"] == "SALIDA":
-            stock_actual -= mov["cantidad"]
-    
-    # Obtener el último precio unitario para calcular el valor del stock
-    ultimo_precio_unitario = 0.0
-    for mov in reversed(movimientos):
+            stock_calculado -= mov["cantidad"]
+
         if mov["precio_unitario"] > 0:
             ultimo_precio_unitario = mov["precio_unitario"]
-            break
-    
-    # Calcular el valor total del stock disponible
+
+    stock_registrado = float(insumo.stock_actual or 0.0)
+    # Si hay diferencia notable, priorizar el stock calculado para mantener consistencia del kardex
+    stock_actual = stock_calculado if abs(stock_calculado - stock_registrado) > 0.0001 else stock_registrado
     valor_stock_total = stock_actual * ultimo_precio_unitario
-    
+    if abs(stock_registrado - stock_calculado) > 0.0001:
+        insumo.stock_actual = stock_calculado
+        db.commit()
+
+    insumo_payload = {
+        "id": insumo.id,
+        "nombre": insumo.nombre,
+        "descripcion": insumo.descripcion,
+        "unidad_medida": insumo.unidad_medida,
+        "stock_actual": stock_actual,
+        "stock_registrado": stock_registrado,
+        "stock_calculado": stock_calculado,
+        "stock_minimo": float(insumo.stock_minimo or 0.0),
+        "especialidad_id": insumo.especialidad_id,
+    }
+
     return {
+        "insumo": insumo_payload,
         "movimientos": movimientos,
         "stock_actual": stock_actual,
+        "stock_calculado": stock_calculado,
+        "stock_registrado": stock_registrado,
         "valor_stock_total": valor_stock_total,
-        "ultimo_precio_unitario": ultimo_precio_unitario
+        "ultimo_precio_unitario": ultimo_precio_unitario,
     }
 
 # Reporte de stock
@@ -286,90 +393,130 @@ def get_stock_report(db: Session = Depends(database.get_db)):
         })
     return reporte
 
+def _calcular_lotes_disponibles(db: Session, insumo_id: int):
+    entradas = (
+        db.query(models.Entrada)
+        .filter(models.Entrada.insumo_id == insumo_id, models.Entrada.cantidad > 0)
+        .order_by(models.Entrada.fecha_vencimiento, models.Entrada.id)
+        .all()
+    )
+    if not entradas:
+        return []
+
+    salidas = (
+        db.query(models.Salida)
+        .filter(models.Salida.insumo_id == insumo_id)
+        .order_by(models.Salida.fecha, models.Salida.id)
+        .all()
+    )
+
+    lotes: dict[str, dict] = {}
+
+    def ensure_lote(key: str, numero_lote: Optional[str], fecha_vencimiento, precio_unitario) -> dict:
+        if key not in lotes:
+            lotes[key] = {
+                "numero_lote": numero_lote,
+                "fecha_vencimiento": fecha_vencimiento,
+                "precio_unitario": Decimal(str(precio_unitario)) if precio_unitario is not None else Decimal("0"),
+                "cantidad_total": Decimal("0"),
+                "consumido": Decimal("0"),
+            }
+        return lotes[key]
+
+    for entrada in entradas:
+        key = entrada.numero_lote or f"SIN_LOTE_{entrada.id}"
+        lote = ensure_lote(key, entrada.numero_lote, entrada.fecha_vencimiento, entrada.precio_unitario)
+        lote["cantidad_total"] += Decimal(str(entrada.cantidad))
+        if entrada.fecha_vencimiento and (
+            lote["fecha_vencimiento"] is None or entrada.fecha_vencimiento < lote["fecha_vencimiento"]
+        ):
+            lote["fecha_vencimiento"] = entrada.fecha_vencimiento
+        if entrada.precio_unitario and (lote["precio_unitario"] or Decimal("0")) == 0:
+            lote["precio_unitario"] = Decimal(str(entrada.precio_unitario))
+
+    salidas_sin_lote: list[Decimal] = []
+    for salida in salidas:
+        cantidad = Decimal(str(salida.cantidad or 0))
+        if cantidad <= 0:
+            continue
+        if salida.numero_lote:
+            key = salida.numero_lote
+            lote = ensure_lote(key, salida.numero_lote, salida.fecha_vencimiento, salida.precio_unitario)
+            lote["consumido"] += cantidad
+        else:
+            salidas_sin_lote.append(cantidad)
+
+    lotes_ordenados = sorted(
+        lotes.values(),
+        key=lambda item: item["fecha_vencimiento"] or date.max
+    )
+
+    for cantidad in salidas_sin_lote:
+        restante = cantidad
+        for lote in lotes_ordenados:
+            disponible = lote["cantidad_total"] - lote["consumido"]
+            if disponible <= 0:
+                continue
+            uso = min(disponible, restante)
+            lote["consumido"] += uso
+            restante -= uso
+            if restante <= 0:
+                break
+
+    disponibles = []
+    for lote in lotes_ordenados:
+        disponible = lote["cantidad_total"] - lote["consumido"]
+        if disponible > 0:
+            disponibles.append(
+                {
+                    "numero_lote": lote["numero_lote"],
+                    "fecha_vencimiento": lote["fecha_vencimiento"],
+                    "stock_disponible": float(disponible),
+                    "precio_unitario": float(lote["precio_unitario"]),
+                }
+            )
+
+    return disponibles
+
+
 @app.get("/insumos/{insumo_id}/lotes-disponibles")
 def get_lotes_disponibles(insumo_id: int, db: Session = Depends(database.get_db)):
-    """Obtiene los lotes disponibles para un insumo, ordenados por fecha de vencimiento (FEFO), 
-    incluyendo el precio unitario y calculando correctamente el stock disponible por lote."""
-    
-    # Obtener todas las entradas para este insumo con sus precios
-    entradas = db.query(models.Entrada).filter(
-        models.Entrada.insumo_id == insumo_id,
-        models.Entrada.cantidad > 0
-    ).all()
-    
-    # Obtener todas las salidas para este insumo (asumiendo que las salidas registran el lote)
-    salidas = db.query(models.Salida).filter(
-        models.Salida.insumo_id == insumo_id
-    ).all()
-    
-    # Agrupar entradas por lote (usando numero_lote y fecha_vencimiento como clave)
-    lotes_entrada = {}
-    for entrada in entradas:
-        # Crear clave única para el lote
-        lote_key = f"{entrada.numero_lote or 'SIN_LOTE'}_{entrada.fecha_vencimiento or '9999-12-31'}"
-        
-        if lote_key not in lotes_entrada:
-            lotes_entrada[lote_key] = {
-                'numero_lote': entrada.numero_lote,
-                'fecha_vencimiento': entrada.fecha_vencimiento,
-                'precio_unitario': float(entrada.precio_unitario) if entrada.precio_unitario else 0.0,
-                'cantidad_total': 0.0
-            }
-        
-        lotes_entrada[lote_key]['cantidad_total'] += float(entrada.cantidad)
-    
-    # Calcular salidas por lote
-    # NOTA: Esto asume que tus salidas tienen un campo numero_lote
-    # Si no lo tienen, necesitarás modificar tu modelo Salida para incluirlo
-    lotes_salida = {}
-    for salida in salidas:
-        # Si tu modelo Salida no tiene numero_lote, esta lógica no funcionará correctamente
-        # Por ahora, asumiremos que todas las salidas se aplican al primer lote disponible (FEFO)
-        pass
-    
-    # Para una implementación correcta de FEFO, necesitas registrar el lote en las salidas
-    # Pero como workaround temporal, calcularemos el stock total y lo distribuiremos
-    
-    # Obtener el stock actual del insumo
+    """Obtiene los lotes disponibles para un insumo aplicando FEFO y restando las salidas registradas."""
     insumo = db.query(models.Insumo).filter(models.Insumo.id == insumo_id).first()
     if not insumo:
         raise HTTPException(status_code=404, detail="Insumo no encontrado")
-    
-    stock_actual = float(insumo.stock_actual)
-    
-    # Si el stock actual es 0, no hay lotes disponibles
-    if stock_actual <= 0:
-        return []
-    
-    # Calcular lotes disponibles con stock proporcional
-    lotes_disponibles = []
-    stock_restante = stock_actual
-    
-    # Ordenar entradas por fecha de vencimiento (FEFO)
-    entradas_ordenadas = sorted(entradas, key=lambda x: x.fecha_vencimiento or '9999-12-31')
-    
-    for entrada in entradas_ordenadas:
-        if stock_restante <= 0:
-            break
-            
-        cantidad_entrada = float(entrada.cantidad)
-        if cantidad_entrada <= 0:
-            continue
-            
-        # Determinar cuánto stock disponible tiene este lote
-        stock_lote = min(cantidad_entrada, stock_restante)
-        
-        if stock_lote > 0:
-            lotes_disponibles.append({
-                'numero_lote': entrada.numero_lote,
-                'fecha_vencimiento': entrada.fecha_vencimiento,
-                'stock_disponible': stock_lote,
-                'precio_unitario': float(entrada.precio_unitario) if entrada.precio_unitario else 0.0
-            })
-            
-            stock_restante -= stock_lote
-    
-    return lotes_disponibles
+    return _calcular_lotes_disponibles(db, insumo_id)
+
+
+@app.get("/reportes/proximos-a-vencer")
+def get_proximos_a_vencer(dias: int = 30, db: Session = Depends(database.get_db)):
+    """Lista los lotes con fecha de vencimiento dentro del rango solicitado."""
+    if dias <= 0:
+        dias = 7
+    fecha_hoy = date.today()
+    fecha_limite = fecha_hoy + timedelta(days=dias)
+
+    resultados = []
+    insumos = db.query(models.Insumo).all()
+    for insumo in insumos:
+        lotes = _calcular_lotes_disponibles(db, insumo.id)
+        for lote in lotes:
+            fecha_v = lote["fecha_vencimiento"]
+            if not fecha_v:
+                continue
+            if fecha_hoy <= fecha_v <= fecha_limite:
+                resultados.append({
+                    "insumo_id": insumo.id,
+                    "nombre": insumo.nombre,
+                    "numero_lote": lote["numero_lote"],
+                    "fecha_vencimiento": fecha_v,
+                    "stock_disponible": lote["stock_disponible"],
+                    "precio_unitario": lote["precio_unitario"],
+                    "dias_restantes": (fecha_v - fecha_hoy).days,
+                })
+
+    resultados.sort(key=lambda item: (item["fecha_vencimiento"], -item["stock_disponible"]))
+    return {"resultados": resultados, "total": len(resultados), "dias": dias}
 
 @app.post("/alertas/vencimiento", response_model=list[schemas.Alerta])
 def generate_vencimiento_alerts(dias: int = 30, db: Session = Depends(database.get_db)):
@@ -403,21 +550,76 @@ def generate_vencimiento_alerts(dias: int = 30, db: Session = Depends(database.g
                     fecha=date.today()
                 )
                 db.add(alerta)
+                alerta.insumo_nombre = insumo.nombre
                 alertas_creadas.append(alerta)
     
     db.commit()
     return alertas_creadas
 
+# Auditoría
+@app.get("/auditoria", response_model=dict)
+def read_auditoria(skip: int = 0, limit: int = 100, db: Session = Depends(database.get_db)):
+    """Devuelve la bitácora de acciones ordenada de la más reciente a la más antigua."""
+    limit = min(max(limit, 1), 1000)
+    base_query = db.query(models.Auditoria).order_by(models.Auditoria.fecha.desc(), models.Auditoria.id.desc())
+    total = base_query.count()
+    registros = base_query.offset(skip).limit(limit).all()
+
+    # Obtener usuarios relacionados para mostrar nombre/rol
+    usuario_ids = {registro.usuario_id for registro in registros if registro.usuario_id}
+    usuarios = {}
+    if usuario_ids:
+        rows = db.query(models.Usuario).filter(models.Usuario.id.in_(usuario_ids)).all()
+        usuarios = {row.id: {"id": row.id, "nombre": row.nombre, "email": row.email, "rol": row.rol} for row in rows}
+
+    records = []
+    for registro in registros:
+        records.append({
+            "id": registro.id,
+            "fecha": registro.fecha,
+            "accion": registro.accion,
+            "detalle": registro.detalle,
+            "ip_address": registro.ip_address,
+            "usuario": usuarios.get(registro.usuario_id),
+        })
+
+    return {"records": records, "total": total, "skip": skip, "limit": limit}
+
+def ensure_default_especialidades(db: Session):
+    existentes = {esp.nombre for esp in db.query(models.Especialidad).all()}
+    faltantes = [nombre for nombre in DEFAULT_ESPECIALIDADES if nombre not in existentes]
+    if faltantes:
+        db.add_all([models.Especialidad(nombre=nombre) for nombre in faltantes])
+        db.commit()
+
+
 # Endpoint para obtener especialidades
 @app.get("/especialidades/", response_model=list[schemas.Especialidad])
 def read_especialidades(skip: int = 0, limit: int = 100, db: Session = Depends(database.get_db)):
+    ensure_default_especialidades(db)
     return db.query(models.Especialidad).offset(skip).limit(limit).all()
+
+@app.get("/especialidades/disponibles", response_model=list[str])
+def read_especialidades_disponibles(db: Session = Depends(database.get_db)):
+    """Devuelve los nombres de especialidades disponibles, incluyendo las de insumos sin relación."""
+    ensure_default_especialidades(db)
+    nombres = {row[0] for row in db.query(models.Especialidad.nombre).all() if row[0]}
+
+    # Detectar insumos sin especialidad asignada
+    insumos_sin_especialidad = db.query(models.Insumo).filter(models.Insumo.especialidad_id.is_(None)).count()
+    if insumos_sin_especialidad > 0:
+        nombres.add("Sin especialidad")
+
+    return sorted(nombres)
 
 # main.py - Añadir este endpoint
 @app.get("/reportes/consumo-por-especialidad")
 def get_consumo_por_especialidad(
     fecha_inicio: Optional[date] = None,
     fecha_fin: Optional[date] = None,
+    fecha_Inicio: Optional[date] = None,
+    fecha_Fin: Optional[date] = None,
+    especialidad: Optional[str] = None,
     db: Session = Depends(database.get_db)
 ):
     """
@@ -425,28 +627,40 @@ def get_consumo_por_especialidad(
     Si no se especifican fechas, devuelve el último mes.
     """
     from datetime import date, timedelta
-    
+
+    if fecha_Inicio and not fecha_inicio:
+        fecha_inicio = fecha_Inicio
+    if fecha_Fin and not fecha_fin:
+        fecha_fin = fecha_Fin
+
     # Establecer rango de fechas por defecto (último mes)
     if fecha_fin is None:
         fecha_fin = date.today()
     if fecha_inicio is None:
         fecha_inicio = fecha_fin - timedelta(days=30)
-    
+    especialidad_normalizada = especialidad.strip().lower() if especialidad else None
+
     # Query principal
     resultados = db.query(
-        models.Especialidad.nombre.label('especialidad'),
+        func.coalesce(models.Especialidad.nombre, "Sin especialidad").label('especialidad'),
         models.Insumo.nombre.label('insumo'),
         func.sum(models.Salida.cantidad).label('cantidad_total'),
         func.sum(models.Salida.cantidad * models.Salida.precio_unitario).label('costo_total')
     ).select_from(models.Salida)\
      .join(models.Insumo, models.Salida.insumo_id == models.Insumo.id)\
-     .join(models.Especialidad, models.Insumo.especialidad_id == models.Especialidad.id)\
+     .outerjoin(models.Especialidad, models.Insumo.especialidad_id == models.Especialidad.id)\
      .filter(models.Salida.fecha >= fecha_inicio)\
      .filter(models.Salida.fecha <= fecha_fin)\
-     .group_by(models.Especialidad.nombre, models.Insumo.nombre)\
-     .order_by(models.Especialidad.nombre, func.sum(models.Salida.cantidad).desc())\
-     .all()
-    
+     .group_by(func.coalesce(models.Especialidad.nombre, "Sin especialidad"), models.Insumo.nombre)\
+     .order_by(func.coalesce(models.Especialidad.nombre, "Sin especialidad"), func.sum(models.Salida.cantidad).desc())
+
+    if especialidad_normalizada and especialidad_normalizada not in {"todas", "todos", "todas las especialidades"}:
+        resultados = resultados.having(
+            func.lower(func.coalesce(models.Especialidad.nombre, "Sin especialidad")) == especialidad_normalizada
+        )
+
+    resultados = resultados.all()
+
     # Formatear resultado
     reporte = {}
     for row in resultados:
@@ -476,3 +690,9 @@ def get_consumo_por_especialidad(
         },
         'especialidades': reporte
     }
+
+
+
+
+
+

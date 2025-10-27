@@ -1,0 +1,13 @@
+﻿const handleSalidaSubmit = async (event) => {
+    event.preventDefault();
+    setFeedback({ type: null, message: '' });
+
+    if (!fefoInfo) {
+      setFeedback({
+        type: 'error',
+        message:
+          'No hay lote disponible para la salida. Registre primero una entrada.',
+      });
+      return;
+    }
+

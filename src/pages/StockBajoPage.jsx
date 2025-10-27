@@ -4,13 +4,6 @@ import { Header } from '../components/Layout/Header'
 import { Card } from '../components/UI/Card'
 import api from '../services/api'
 
-const normalizeEspecialidad = (value) => {
-  if (!value) return 'Sin especialidad'
-  if (typeof value === 'string') return value
-  if (typeof value === 'object') return value.nombre || value.descripcion || 'Sin especialidad'
-  return String(value)
-}
-
 export default function StockBajoPage({ user }) {
   const [insumosBajoStock, setInsumosBajoStock] = useState([])
   const [loading, setLoading] = useState(true)
@@ -61,7 +54,11 @@ export default function StockBajoPage({ user }) {
                   {insumosBajoStock.map((item, index) => (
                     <tr key={item.id ?? `stock-${index}`}>
                       <td className="px-6 py-4 text-sm font-medium text-gray-900">{item.nombre}</td>
-                      <td className="px-6 py-4 text-sm text-gray-500">{normalizeEspecialidad(item.especialidad)}</td>
+                      <td className="px-6 py-4 text-sm text-gray-500">
+                        {item.especialidad_nombre ||
+                          item.especialidad?.nombre ||
+                          'Sin especialidad'}
+                      </td>
                       <td className="px-6 py-4 text-sm text-gray-500">{item.stock_actual}</td>
                       <td className="px-6 py-4 text-sm text-gray-500">{item.stock_minimo}</td>
                       <td className="px-6 py-4 text-sm">

@@ -64,6 +64,9 @@ const normalizeMovimientos = (movimientos) => {
       const fechaA = a.fecha ? new Date(a.fecha) : new Date("1900-01-01");
       const fechaB = b.fecha ? new Date(b.fecha) : new Date("1900-01-01");
       if (fechaA.getTime() === fechaB.getTime()) {
+        if (a.tipo !== b.tipo) {
+          return a.tipo === "ENTRADA" ? -1 : 1;
+        }
         return (a.id || 0) - (b.id || 0);
       }
       return fechaA - fechaB;
@@ -89,16 +92,20 @@ export function TarjetaControl({ insumo, movimientos, onRegistrarEntrada }) {
       return acc;
     }, 0);
 
-    const saldoFinal =
-      insumo?.stock_actual !== undefined ? Number(insumo.stock_actual) : netCantidad;
-    const valorFinal =
-      insumo?.valor_stock_total !== undefined ? Number(insumo.valor_stock_total) : netValor;
+    const saldoReferenciaRaw =
+      insumo?.stock_calculado ?? insumo?.stock_actual ?? netCantidad;
+    const saldoFinal = Number.isFinite(Number(saldoReferenciaRaw))
+      ? Number(saldoReferenciaRaw)
+      : netCantidad;
 
-    const saldoInicial = saldoFinal - netCantidad;
-    const valorInicial = valorFinal - netValor;
+    const valorReferenciaRaw =
+      insumo?.valor_stock_total ?? insumo?.valor_calculado ?? netValor;
+    const valorFinal = Number.isFinite(Number(valorReferenciaRaw))
+      ? Number(valorReferenciaRaw)
+      : netValor;
 
-    let saldoCantidad = saldoInicial;
-    let saldoValor = valorInicial;
+    let saldoCantidad = 0;
+    let saldoValor = 0;
 
     const detalle = lista.map((mov) => {
       const cantidad = Math.abs(mov.cantidad);
@@ -156,8 +163,8 @@ export function TarjetaControl({ insumo, movimientos, onRegistrarEntrada }) {
         entradaTotal: null,
         salidaCantidad: null,
         salidaTotal: null,
-        saldoCantidad: saldoInicial,
-        saldoValor: valorInicial,
+        saldoCantidad: 0,
+        saldoValor: 0,
       },
       ...detalle,
     ];
@@ -169,7 +176,15 @@ export function TarjetaControl({ insumo, movimientos, onRegistrarEntrada }) {
     };
   }, [insumo, movimientos]);
 
-  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  
+
+    const displayRows = useMemo(() => {
+    if (!rows || rows.length <= 1) return rows;
+    const [saldoInicialRow, ...resto] = rows;
+    return [saldoInicialRow, ...resto.slice().reverse()];
+  }, [rows]);
+
+  const totalPages = Math.max(1, Math.ceil((displayRows?.length ?? 0) / PAGE_SIZE));
   const storageKey = insumo?.id ? `kardex_page_${insumo.id}` : null;
 
   useEffect(() => {
@@ -197,9 +212,9 @@ export function TarjetaControl({ insumo, movimientos, onRegistrarEntrada }) {
   }, [page, totalPages]);
 
   const startIndex = (page - 1) * PAGE_SIZE;
-  const endIndex = Math.min(startIndex + PAGE_SIZE, rows.length);
-  const pageRows = rows.slice(startIndex, endIndex);
+  const endIndex = Math.min(startIndex + PAGE_SIZE, displayRows?.length ?? 0);
 
+  const pageRows = displayRows ? displayRows.slice(startIndex, endIndex) : [];
   const formatCantidad = (value) =>
     value === null || value === undefined ? "-" : quantityFormatter.format(value);
 
@@ -232,7 +247,8 @@ export function TarjetaControl({ insumo, movimientos, onRegistrarEntrada }) {
   };
 
   const handlePrint = () => {
-    const printRows = rows
+    const printableRows = pageRows.length ? pageRows : displayRows || [];
+    const printRows = printableRows
       .map((row) => {
         const cells = [
           row.fecha || "-",

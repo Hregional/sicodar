@@ -40,9 +40,43 @@ export default function KardexPage({ user }) {
           : [];
 
         setMovimientos(movimientosObtenidos);
+
+        const insumoBase = insumoRes.data || {};
+        const kardexInsumo = kardexPayload?.insumo || {};
+
+        const stockCalculado =
+          typeof kardexPayload?.stock_actual === 'number'
+            ? kardexPayload.stock_actual
+            : kardexInsumo?.stock_calculado;
+
+        const stockRegistrado =
+          typeof kardexPayload?.stock_registrado === 'number'
+            ? kardexPayload.stock_registrado
+            : insumoBase?.stock_actual;
+
         setInsumo({
-          ...(insumoRes.data || {}),
-          ...(kardexPayload?.insumo || {}),
+          ...insumoBase,
+          ...kardexInsumo,
+          stock_actual:
+            stockCalculado ??
+            kardexInsumo?.stock_actual ??
+            insumoBase?.stock_actual ??
+            0,
+          stock_calculado:
+            kardexPayload?.stock_calculado ??
+            kardexInsumo?.stock_calculado ??
+            stockCalculado ??
+            null,
+          stock_registrado: stockRegistrado ?? null,
+          valor_stock_total:
+            kardexPayload?.valor_stock_total ??
+            kardexInsumo?.valor_stock_total ??
+            insumoBase?.valor_stock_total ??
+            0,
+          ultimo_precio_unitario:
+            kardexPayload?.ultimo_precio_unitario ??
+            kardexInsumo?.ultimo_precio_unitario ??
+            null,
         });
       } catch (err) {
         console.error('Error cargando kardex:', err);

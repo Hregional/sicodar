@@ -34,7 +34,7 @@ const salidaInitial = () => ({
   fecha_vencimiento: '',
 });
 
-const isAdminRole = (rol) => ['admin', 'super_admin'].includes(rol);
+const isAdminRole = (rol) => ['admin', 'super_admin','empleado'].includes(rol);
 
 const normalizeCantidad = (value) => (value ? Number(value) : 0);
 
@@ -460,7 +460,7 @@ export default function MovimientosPage({ user }) {
 
                     <div>
                       <label className="mb-2 block text-sm font-semibold text-slate-700">
-                        NÃºmero de Lote
+                        Numero de Lote
                       </label>
                       <Input
                         value={entradaForm.numero_lote}

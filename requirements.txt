@@ -1,0 +1,11 @@
+﻿# Frontend dependencies (install with npm, e.g. npm install <package>@<version>)
+react@18.2.0
+react-dom@18.2.0
+react-router-dom@7.9.4
+axios@1.6.8
+lucide-react@0.546.0
+xlsx@0.18.5
+html2canvas@1.4.1
+jspdf@2.5.1
+recharts@3.3.0
+jwt-decode@4.0.0

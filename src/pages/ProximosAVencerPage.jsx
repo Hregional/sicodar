@@ -76,16 +76,17 @@ export default function ProximosAVencerPage({ user }) {
   const filas = useMemo(
     () =>
       proximosAVencer.map((item) => ({
-        id: `${item.id ?? normalizeNombre(item)}-${item.numero_lote ?? ''}`,
+        id: `${item.insumo_id ?? normalizeNombre(item)}-${item.numero_lote ?? ''}`,
         nombre: normalizeNombre(item),
-        numero_lote: item.numero_lote || '—',
+        numero_lote: item.numero_lote || '-',
         fecha_vencimiento: item.fecha_vencimiento
           ? new Date(item.fecha_vencimiento).toLocaleDateString('es-ES')
           : 'Sin fecha',
-        cantidad: item.cantidad ?? item.stock_disponible ?? 0,
+        cantidad: Number(item.stock_disponible ?? item.cantidad ?? 0),
       })),
     [proximosAVencer]
   );
+  const totalFilas = filas.length;
 
   return (
     <div className="flex min-h-screen bg-gradient-to-br from-slate-50 via-white to-sky-50">
@@ -108,7 +109,7 @@ export default function ProximosAVencerPage({ user }) {
                 </div>
               </div>
               <div className="flex items-center gap-3 text-sm text-slate-500">
-                Mostrando insumos que vencen en los próximos:
+                Mostrando {totalFilas} insumo(s) que vencen en los próximos:
                 <select
                   className="rounded-full border border-slate-200 bg-white px-3 py-1 text-sm font-medium text-slate-600 transition hover:border-slate-300 focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-400"
                   value={diasFiltro}

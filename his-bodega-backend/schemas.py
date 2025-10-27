@@ -1,4 +1,4 @@
-# schemas.py
+﻿# schemas.py
 from pydantic import BaseModel
 from datetime import date
 from typing import Optional
@@ -74,6 +74,7 @@ class EntradaCreate(EntradaBase):
 
 class Entrada(EntradaBase):
     id: int
+    insumo_nombre: Optional[str] = None
     
     class Config:
         from_attributes = True
@@ -111,3 +112,4 @@ class Alerta(AlertaBase):
     
     class Config:
         from_attributes = True
+

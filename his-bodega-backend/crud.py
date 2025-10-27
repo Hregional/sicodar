@@ -1,4 +1,3 @@
-# crud.py
 from sqlalchemy.orm import Session
 import models
 import schemas
@@ -52,8 +51,6 @@ def delete_insumo(db: Session, insumo_id: int):
 def create_entrada(db: Session, entrada: schemas.EntradaCreate):
     db_entrada = models.Entrada(**entrada.dict())
     db.add(db_entrada)
-    db.commit()
-    db.refresh(db_entrada)
     return db_entrada
 
 def get_entradas(db: Session, skip: int = 0, limit: int = 100):
@@ -62,8 +59,6 @@ def get_entradas(db: Session, skip: int = 0, limit: int = 100):
 def create_salida(db: Session, salida: schemas.SalidaCreate):
     db_salida = models.Salida(**salida.dict())
     db.add(db_salida)
-    db.commit()
-    db.refresh(db_salida)
     return db_salida
 
 def get_salidas(db: Session, skip: int = 0, limit: int = 100):
