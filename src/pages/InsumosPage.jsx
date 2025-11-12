@@ -313,9 +313,6 @@ export default function InsumosPage({ user }) {
                   className="w-64 rounded-full border border-slate-200 bg-white px-9 py-2 text-sm text-slate-600 focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-400"
                 />
               </div>
-              <Button variant="outline" className="rounded-full px-4 py-2 text-xs" onClick={() => navigate('/insumos')}>
-                Ver Kardex global
-              </Button>
             </div>
 
             <div className="overflow-x-auto">

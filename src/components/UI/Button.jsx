@@ -1,7 +1,16 @@
 // src/components/ui/Button.jsx
 import React from 'react';
 
-export function Button({ children, variant = "primary", size = "md", onClick, disabled = false, className = "" }) {
+export function Button({
+  children,
+  variant = "primary",
+  size = "md",
+  onClick,
+  disabled = false,
+  className = "",
+  type = "button",
+  ...props
+}) {
   const baseClasses = "inline-flex items-center justify-center font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2";
   const sizeClasses = {
     sm: "px-3 py-1 text-xs",
@@ -20,9 +29,11 @@ export function Button({ children, variant = "primary", size = "md", onClick, di
 
   return (
     <button
+      type={type}
       onClick={onClick}
       disabled={disabled}
       className={`${baseClasses} ${sizeClasses[size]} ${variantClasses[variant]} ${disabled ? 'opacity-50 cursor-not-allowed' : ''} ${className}`}
+      {...props}
     >
       {children}
     </button>

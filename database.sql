@@ -100,6 +100,51 @@ CREATE TABLE IF NOT EXISTS auditoria (
     REFERENCES usuarios(id) ON UPDATE CASCADE ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
+CREATE TABLE IF NOT EXISTS requisiciones (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  numero INT NOT NULL UNIQUE,
+  numero_despacho INT,
+  fecha DATE NOT NULL,
+  servicio VARCHAR(150) NOT NULL,
+  lugar VARCHAR(150),
+  comentario TEXT,
+  pacientes_hospitalizados INT,
+  solicitante_nombre VARCHAR(150),
+  solicitante_cargo VARCHAR(150),
+  jefe_nombre VARCHAR(150),
+  jefe_cargo VARCHAR(150),
+  recibe_nombre VARCHAR(150),
+  recibe_cargo VARCHAR(150),
+  entrega_nombre VARCHAR(150),
+  entrega_cargo VARCHAR(150),
+  total_despachado DECIMAL(12,2) DEFAULT 0.00,
+  created_by INT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_requisicion_usuario FOREIGN KEY (created_by)
+    REFERENCES usuarios(id) ON UPDATE CASCADE ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS requisicion_detalles (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  requisicion_id INT NOT NULL,
+  insumo_id INT NOT NULL,
+  codigo VARCHAR(50),
+  nombre_producto VARCHAR(255),
+  unidad VARCHAR(50),
+  numero_kardex VARCHAR(100),
+  numero_lote VARCHAR(100),
+  fecha_vencimiento DATE,
+  cantidad_solicitada DECIMAL(10,2) NOT NULL,
+  cantidad_despachada DECIMAL(10,2) NOT NULL,
+  precio_unitario DECIMAL(10,2) DEFAULT 0.00,
+  valor_total DECIMAL(12,2) DEFAULT 0.00,
+  notas TEXT,
+  CONSTRAINT fk_req_det_requisicion FOREIGN KEY (requisicion_id)
+    REFERENCES requisiciones(id) ON UPDATE CASCADE ON DELETE CASCADE,
+  CONSTRAINT fk_req_det_insumo FOREIGN KEY (insumo_id)
+    REFERENCES insumos(id) ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB;
+
 -- Usuario de ejemplo (reemplaza password_hash con el generado por passlib)
 -- INSERT INTO usuarios (nombre, email, password_hash, rol)
 -- VALUES ('Administrador', 'admin@ejemplo.com', '<hash_generado>', 'admin');

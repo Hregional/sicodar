@@ -77,3 +77,53 @@ class Auditoria(Base):
     detalle = Column(Text)
     fecha = Column(DATETIME, server_default=func.now())
     ip_address = Column(String(45))
+
+
+class Requisicion(Base):
+    __tablename__ = "requisiciones"
+    id = Column(Integer, primary_key=True, index=True)
+    numero = Column(Integer, index=True, unique=True, nullable=False)
+    numero_despacho = Column(Integer, nullable=True)
+    fecha = Column(DATE, nullable=False)
+    servicio = Column(String(150), nullable=False)
+    lugar = Column(String(150))
+    comentario = Column(Text)
+    pacientes_hospitalizados = Column(Integer)
+    solicitante_nombre = Column(String(150))
+    solicitante_cargo = Column(String(150))
+    jefe_nombre = Column(String(150))
+    jefe_cargo = Column(String(150))
+    recibe_nombre = Column(String(150))
+    recibe_cargo = Column(String(150))
+    entrega_nombre = Column(String(150))
+    entrega_cargo = Column(String(150))
+    total_despachado = Column(DECIMAL(12, 2), default=0.00)
+    created_by = Column(Integer, ForeignKey("usuarios.id"))
+    created_at = Column(TIMESTAMP, server_default=func.now())
+
+    detalles = relationship(
+        "RequisicionDetalle",
+        back_populates="requisicion",
+        cascade="all, delete-orphan",
+    )
+
+
+class RequisicionDetalle(Base):
+    __tablename__ = "requisicion_detalles"
+    id = Column(Integer, primary_key=True, index=True)
+    requisicion_id = Column(Integer, ForeignKey("requisiciones.id"), nullable=False)
+    insumo_id = Column(Integer, ForeignKey("insumos.id"), nullable=False)
+    codigo = Column(String(50))
+    nombre_producto = Column(String(255))
+    unidad = Column(String(50))
+    numero_kardex = Column(String(100))
+    numero_lote = Column(String(100))
+    fecha_vencimiento = Column(DATE)
+    cantidad_solicitada = Column(DECIMAL(10, 2), nullable=False)
+    cantidad_despachada = Column(DECIMAL(10, 2), nullable=False)
+    precio_unitario = Column(DECIMAL(10, 2), default=0.00)
+    valor_total = Column(DECIMAL(12, 2), default=0.00)
+    notas = Column(Text)
+
+    requisicion = relationship("Requisicion", back_populates="detalles")
+    insumo = relationship("Insumo")

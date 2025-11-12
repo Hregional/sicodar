@@ -4,6 +4,8 @@ import { NavLink } from 'react-router-dom';
 import {
   BarChart3,
   Boxes,
+  ClipboardList,
+  FileOutput,
   FileText,
   LayoutDashboard,
   ShieldCheck,
@@ -34,6 +36,8 @@ const navigationItems = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/insumos', label: 'Insumos', icon: Boxes },
   { to: '/movimientos', label: 'Movimientos', icon: Shuffle },
+  { to: '/requisiciones', label: 'Requisiciones', icon: ClipboardList },
+  { to: '/despacho', label: 'Despacho', icon: FileOutput },
   { to: '/facturas', label: 'Facturas', icon: FileText },
   {
     to: '/reportes-bi',

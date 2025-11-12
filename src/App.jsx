@@ -19,6 +19,8 @@ import ProximosAVencerPage from './pages/ProximosAVencerPage.jsx';
 import ReportesBIPage from './pages/ReportesBIPage.jsx';
 import CrearUsuariosPage from './pages/CrearUsuariosPage.jsx';
 import AuditoriaPage from './pages/AuditoriaPage.jsx';
+import RequisicionesPage from './pages/RequisicionesPage.jsx';
+import DespachoPage from './pages/DespachoPage.jsx';
 import api from './services/api.js';
 import {
   getToken,
@@ -160,6 +162,14 @@ function App() {
           }
         />
         <Route
+          path="/requisiciones"
+          element={
+            <ProtectedRoute {...protectedRouteProps}>
+              <RequisicionesPage user={user} />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/kardex/:insumoId?"
           element={
             <ProtectedRoute {...protectedRouteProps}>
@@ -172,6 +182,14 @@ function App() {
           element={
             <ProtectedRoute {...protectedRouteProps}>
               <FacturasPage user={user} />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/despacho"
+          element={
+            <ProtectedRoute {...protectedRouteProps}>
+              <DespachoPage user={user} />
             </ProtectedRoute>
           }
         />

@@ -2,7 +2,7 @@
 from fastapi import FastAPI, Depends, HTTPException, status, Response
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import func 
+from sqlalchemy import func, inspect, text
 from sqlalchemy.exc import SQLAlchemyError
 from fastapi.middleware.cors import CORSMiddleware
 from datetime import timedelta, date
@@ -30,6 +30,26 @@ app.add_middleware(
 
 # Crear tablas
 models.Base.metadata.create_all(bind=database.engine)
+
+def ensure_requisicion_kardex_column():
+    """Garantiza que la columna numero_kardex exista aunque la base no esté migrada."""
+    try:
+        with database.engine.connect() as connection:
+            inspector = inspect(connection)
+            columns = [col["name"] for col in inspector.get_columns("requisicion_detalles")]
+            if "numero_kardex" not in columns:
+                connection.execute(
+                    text(
+                        "ALTER TABLE requisicion_detalles "
+                        "ADD COLUMN numero_kardex VARCHAR(100) AFTER unidad"
+                    )
+                )
+                connection.commit()
+    except Exception as exc:  # pragma: no cover
+        # Evitar que el backend deje de iniciar si no tiene privilegios.
+        print("Advertencia: no se pudo asegurar la columna numero_kardex:", exc)
+
+ensure_requisicion_kardex_column()
 
 def sync_insumo_stock(db: Session, insumo: models.Insumo) -> float:
     entradas_total = (
@@ -60,6 +80,47 @@ def registrar_auditoria(db, usuario_id, accion, detalle="", ip_address=""):
     )
     db.add(auditoria)
     db.commit()
+
+
+def generar_numero_requisicion(db: Session) -> int:
+    ultimo = db.query(func.max(models.Requisicion.numero)).scalar()
+    return (ultimo or 0) + 1
+
+
+def generar_numero_kardex(db: Session, insumo_id: int) -> str:
+    contador = (
+        db.query(func.count(models.RequisicionDetalle.id))
+        .filter(models.RequisicionDetalle.insumo_id == insumo_id)
+        .scalar()
+        or 0
+    )
+    correlativo = int(contador) + 1
+    return f"{insumo_id}-{correlativo:04d}"
+
+
+def _registrar_salida_para_requisicion(
+    db: Session,
+    salida: schemas.SalidaCreate,
+    current_user: schemas.Usuario,
+):
+    if salida.usuario_id is None:
+        salida.usuario_id = current_user.id
+    insumo = db.query(models.Insumo).filter(models.Insumo.id == salida.insumo_id).first()
+    if not insumo:
+        raise HTTPException(status_code=404, detail="Insumo no encontrado")
+
+    stock_actual_decimal = Decimal(str(insumo.stock_actual or 0))
+    cantidad_decimal = Decimal(str(salida.cantidad))
+    if stock_actual_decimal < cantidad_decimal:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Stock insuficiente para el insumo {insumo.nombre}. "
+                f"Disponible: {float(stock_actual_decimal)}, solicitado: {float(cantidad_decimal)}"
+            ),
+        )
+    insumo.stock_actual = stock_actual_decimal - cantidad_decimal
+    crud.create_salida(db=db, salida=salida)
 
 @app.post("/auth/token", response_model=schemas.Token)
 def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(database.get_db)):
@@ -486,6 +547,250 @@ def get_lotes_disponibles(insumo_id: int, db: Session = Depends(database.get_db)
     if not insumo:
         raise HTTPException(status_code=404, detail="Insumo no encontrado")
     return _calcular_lotes_disponibles(db, insumo_id)
+
+
+@app.post("/requisiciones", response_model=schemas.Requisicion, status_code=201)
+def create_requisicion(
+    requisicion: schemas.RequisicionCreate,
+    current_user: schemas.Usuario = Depends(auth.get_current_user),
+    db: Session = Depends(database.get_db),
+):
+    if not requisicion.detalles:
+        raise HTTPException(status_code=400, detail="Debes agregar al menos un producto a la requisición.")
+
+    numero = requisicion.numero
+    if numero:
+        existente = (
+            db.query(models.Requisicion)
+            .filter(models.Requisicion.numero == numero)
+            .first()
+        )
+        if existente:
+            raise HTTPException(status_code=400, detail="El número de requisición ya existe.")
+    else:
+        numero = generar_numero_requisicion(db)
+
+    numero_despacho = requisicion.numero_despacho or numero
+    modelo = models.Requisicion(
+        numero=numero,
+        numero_despacho=numero_despacho,
+        fecha=requisicion.fecha,
+        servicio=requisicion.servicio,
+        lugar=requisicion.lugar,
+        comentario=requisicion.comentario,
+        pacientes_hospitalizados=requisicion.pacientes_hospitalizados,
+        solicitante_nombre=requisicion.solicitante_nombre,
+        solicitante_cargo=requisicion.solicitante_cargo,
+        jefe_nombre=requisicion.jefe_nombre,
+        jefe_cargo=requisicion.jefe_cargo,
+        recibe_nombre=requisicion.recibe_nombre,
+        recibe_cargo=requisicion.recibe_cargo,
+        entrega_nombre=requisicion.entrega_nombre or current_user.nombre,
+        entrega_cargo=requisicion.entrega_cargo,
+        created_by=current_user.id,
+    )
+    db.add(modelo)
+
+    total = Decimal("0")
+    lineas_validas = 0
+
+    for detalle_in in requisicion.detalles:
+        cantidad_solicitada = Decimal(str(detalle_in.cantidad_solicitada))
+        cantidad_despachada = Decimal(str(detalle_in.cantidad_despachada))
+        if cantidad_despachada <= 0:
+            continue
+
+        insumo = (
+            db.query(models.Insumo)
+            .filter(models.Insumo.id == detalle_in.insumo_id)
+            .first()
+        )
+        if not insumo:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Insumo con ID {detalle_in.insumo_id} no encontrado.",
+            )
+
+        lotes_disponibles = _calcular_lotes_disponibles(db, insumo.id)
+        lote_seleccionado = None
+
+        if detalle_in.numero_lote:
+            for lote in lotes_disponibles:
+                if (lote["numero_lote"] or "") == detalle_in.numero_lote:
+                    lote_seleccionado = lote
+                    break
+            if lote_seleccionado is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"El lote {detalle_in.numero_lote} no está disponible para {insumo.nombre}.",
+                )
+            if Decimal(str(lote_seleccionado["stock_disponible"])) < cantidad_despachada:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"La cantidad solicitada supera el stock del lote {detalle_in.numero_lote}.",
+                )
+        elif lotes_disponibles:
+            stock_total = sum(Decimal(str(l["stock_disponible"])) for l in lotes_disponibles)
+            if stock_total < cantidad_despachada:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"No hay stock suficiente para el insumo {insumo.nombre}.",
+                )
+            for lote in lotes_disponibles:
+                if Decimal(str(lote["stock_disponible"])) >= cantidad_despachada:
+                    lote_seleccionado = lote
+                    break
+            if lote_seleccionado is None:
+                lote_seleccionado = lotes_disponibles[0]
+        else:
+            stock_total = Decimal(str(insumo.stock_actual or 0))
+            if stock_total < cantidad_despachada:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"No hay stock suficiente para el insumo {insumo.nombre}.",
+                )
+
+        numero_lote = detalle_in.numero_lote or (lote_seleccionado["numero_lote"] if lote_seleccionado else None)
+        fecha_vencimiento = detalle_in.fecha_vencimiento or (lote_seleccionado["fecha_vencimiento"] if lote_seleccionado else None)
+
+        if detalle_in.precio_unitario is not None:
+            precio_unitario = Decimal(str(detalle_in.precio_unitario))
+        elif lote_seleccionado and lote_seleccionado["precio_unitario"] is not None:
+            precio_unitario = Decimal(str(lote_seleccionado["precio_unitario"]))
+        else:
+            precio_unitario = Decimal("0")
+
+        valor_total = cantidad_despachada * precio_unitario
+        total += valor_total
+        lineas_validas += 1
+
+        detalle_model = models.RequisicionDetalle(
+            requisicion=modelo,
+            insumo_id=detalle_in.insumo_id,
+            codigo=detalle_in.codigo,
+            nombre_producto=detalle_in.nombre_producto or insumo.nombre,
+            unidad=detalle_in.unidad or insumo.unidad_medida,
+            numero_kardex=detalle_in.numero_kardex
+            or generar_numero_kardex(db, detalle_in.insumo_id),
+            numero_lote=numero_lote,
+            fecha_vencimiento=fecha_vencimiento,
+            cantidad_solicitada=cantidad_solicitada,
+            cantidad_despachada=cantidad_despachada,
+            precio_unitario=precio_unitario,
+            valor_total=valor_total,
+            notas=detalle_in.notas,
+        )
+        db.add(detalle_model)
+
+        salida_payload = schemas.SalidaCreate(
+            insumo_id=detalle_in.insumo_id,
+            cantidad=float(cantidad_despachada),
+            precio_unitario=float(precio_unitario),
+            fecha=requisicion.fecha,
+            usuario_id=current_user.id,
+            numero_referencia=str(numero),
+            remitente_destinatario=requisicion.servicio,
+            numero_lote=numero_lote,
+            fecha_vencimiento=fecha_vencimiento,
+        )
+        _registrar_salida_para_requisicion(db, salida_payload, current_user)
+
+    if lineas_validas == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Debes registrar al menos una línea con cantidad mayor a cero.",
+        )
+
+    modelo.total_despachado = total
+
+    try:
+        db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error al crear la requisición: {str(exc)}")
+    db.refresh(modelo)
+
+    registrar_auditoria(db, current_user.id, "CREAR REQUISICION", f"Número: {modelo.numero}")
+    return modelo
+
+
+@app.get("/requisiciones/proximo-numero")
+def get_proximo_numero(db: Session = Depends(database.get_db)):
+    numero = generar_numero_requisicion(db)
+    return {"numero": numero}
+
+
+@app.get("/requisiciones", response_model=list[schemas.Requisicion])
+def list_requisiciones(skip: int = 0, limit: int = 100, db: Session = Depends(database.get_db)):
+    requisiciones = (
+        db.query(models.Requisicion)
+        .options(joinedload(models.Requisicion.detalles))
+        .order_by(models.Requisicion.fecha.desc(), models.Requisicion.numero.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+    return requisiciones
+
+
+@app.get("/requisiciones/{requisicion_id}", response_model=schemas.Requisicion)
+def read_requisicion(requisicion_id: int, db: Session = Depends(database.get_db)):
+    requisicion = (
+        db.query(models.Requisicion)
+        .options(joinedload(models.Requisicion.detalles))
+        .filter(models.Requisicion.id == requisicion_id)
+        .first()
+    )
+    if not requisicion:
+        raise HTTPException(status_code=404, detail="Requisición no encontrada")
+    return requisicion
+
+
+@app.get("/requisiciones/{requisicion_id}/despacho", response_model=schemas.DespachoDocumento)
+def read_requisicion_despacho(requisicion_id: int, db: Session = Depends(database.get_db)):
+    requisicion = (
+        db.query(models.Requisicion)
+        .options(joinedload(models.Requisicion.detalles))
+        .filter(models.Requisicion.id == requisicion_id)
+        .first()
+    )
+    if not requisicion:
+        raise HTTPException(status_code=404, detail="Requisición no encontrada")
+
+    lineas = []
+    total = Decimal("0")
+    for detalle in requisicion.detalles:
+        subtotal = Decimal(str(detalle.valor_total or 0))
+        total += subtotal
+        lineas.append(
+            schemas.DespachoLinea(
+                producto=detalle.nombre_producto or (detalle.insumo.nombre if detalle.insumo else ""),
+                cantidad=float(detalle.cantidad_despachada or 0),
+                precio=float(detalle.precio_unitario or 0),
+                subtotal=float(subtotal),
+            )
+        )
+
+    ingreso_sistema = requisicion.entrega_nombre
+    if requisicion.created_by:
+        creador = (
+            db.query(models.Usuario)
+            .filter(models.Usuario.id == requisicion.created_by)
+            .first()
+        )
+        if creador:
+            ingreso_sistema = creador.nombre
+
+    return schemas.DespachoDocumento(
+        requisicion_id=requisicion.id,
+        numero=requisicion.numero_despacho or requisicion.numero,
+        servicio=requisicion.servicio,
+        fecha=requisicion.fecha,
+        comentario=requisicion.comentario,
+        total=float(total),
+        ingreso_sistema=ingreso_sistema,
+        lineas=lineas,
+    )
 
 
 @app.get("/reportes/proximos-a-vencer")
