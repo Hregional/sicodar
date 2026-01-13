@@ -1,0 +1,8 @@
+node_modules
+his-bodega-backend
+.git
+.gitignore
+.env
+docker-compose.yml
+docker-compose.override.yml
+README.md
