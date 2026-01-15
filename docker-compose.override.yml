@@ -23,4 +23,4 @@ services:
       - /app/node_modules
       - /app/his-bodega-backend
     environment:
-      - VITE_API_URL=http://localhost:8000
+      - VITE_API_URL=/api

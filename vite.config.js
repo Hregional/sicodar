@@ -7,6 +7,9 @@ export default defineConfig({
   server: {
     allowedHosts: ['sicodar.hro.gob.gt'],
     host: true,
+    hmr: {
+      clientPort: 443,
+    },
   },
   resolve: {
     alias: {
