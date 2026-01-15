@@ -9,7 +9,6 @@ services:
       MYSQL_DATABASE: ${MYSQL_DB}
       MYSQL_USER: ${MYSQL_USER}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
-    command: --default-authentication-plugin=mysql_native_password
     volumes:
       - mariadb_data:/var/lib/mysql
       - ./database.sql:/docker-entrypoint-initdb.d/init.sql
