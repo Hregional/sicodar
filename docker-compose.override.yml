@@ -24,3 +24,4 @@ services:
       - /app/his-bodega-backend
     environment:
       - VITE_API_URL=/api
+      - VITE_API_TARGET=http://backend:8000
