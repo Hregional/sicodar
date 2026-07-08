@@ -82,7 +82,7 @@ Sistema compuesto por un frontend en React/Vite y un backend en FastAPI para ges
 
 - POST /auth/token: Autenticación (grant_type=password).
 - GET /usuarios/me: Perfil del usuario autenticado.
-- CRUD de insumos, entradas, salidas, lertas y reportes (/reportes/consumo-por-especialidad).
+- CRUD de insumos, entradas, salidas, Alertas y reportes (/reportes/consumo-por-especialidad).
 
 La documentación interactiva está en http://localhost:8000/docs.
 
@@ -111,7 +111,7 @@ La documentación interactiva está en http://localhost:8000/docs.
 
 ## Variables y configuraciones destacadas
 
-- Backend: database.py y uth.py obtienen valores sensibles de .env. Nunca subas el .env al repositorio.
+- Backend: database.py y Auth.py obtienen valores sensibles de .env. Nunca subas el .env al repositorio.
 - Frontend: el listado de especialidades se trae de /especialidades/ y tiene fallback con las nueve especialidades por defecto.
 - Login: para ingresar necesitas un usuario existente en la tabla usuarios con 
 ol adecuado.
@@ -142,7 +142,7 @@ npm run build
 ## Notas finales
 
 - El backend usa SQLAlchemy y FastAPI; cualquier migración o ajuste de modelo se refleja en models.py.
-- El frontend usa React 18, vite y librerías como xios, 
+- El frontend usa React 18, vite y librerías como Axios, 
 echarts, lucide-react. Las dependencias están en 
 equirements.txt y package.json.
 - Revisa README cada vez que actualices el flujo de instalación o dependencias para evitar divergencias.
