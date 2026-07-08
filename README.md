@@ -42,7 +42,7 @@ Sistema compuesto por un frontend en React/Vite y un backend en FastAPI para ges
 
 2. Importa el esquema utilizando database.sql:
 
-   `ash
+   `Bash
    mysql -u TU_USUARIO -p < database.sql
    `
 
@@ -65,14 +65,14 @@ Sistema compuesto por un frontend en React/Vite y un backend en FastAPI para ges
 
 1. Instala dependencias:
 
-   `ash
+   `Bash
    cd his-bodega-backend
    pip install -r requirements.txt
    `
 
 2. Levanta el servidor:
 
-   `ash
+   `Bash
    uvicorn main:app --reload
    `
 
@@ -90,22 +90,22 @@ La documentación interactiva está en http://localhost:8000/docs.
 
 1. Instala dependencias (desde la raíz del proyecto):
 
-   `ash
+   `Bash
    npm install
    `
 
 2. Ejecuta en modo desarrollo:
 
-   `ash
+   `Bash
    npm run dev
    `
 
    - Abre http://localhost:5173 en el navegador.
-   - El frontend se comunica con el backend ubicado en http://localhost:8000 (ver src/services/api.js). Cambia aseURL si necesitas otro host/puerto.
+   - El frontend se comunica con el backend ubicado en http://localhost:8000 (ver src/services/api.js). Cambia BaseURL si necesitas otro host/puerto.
 
 3. Compila para producción:
 
-   `ash
+   `Bash
    npm run build
    `
 
@@ -113,13 +113,14 @@ La documentación interactiva está en http://localhost:8000/docs.
 
 - Backend: database.py y uth.py obtienen valores sensibles de .env. Nunca subas el .env al repositorio.
 - Frontend: el listado de especialidades se trae de /especialidades/ y tiene fallback con las nueve especialidades por defecto.
-- Login: para ingresar necesitas un usuario existente en la tabla usuarios con ol adecuado.
+- Login: para ingresar necesitas un usuario existente en la tabla usuarios con 
+ol adecuado.
 
 ## Flujo de trabajo recomendado
 
 1. Clonar repositorio y crear ramas feature en GitHub:
 
-   `ash
+   `Bash
    git clone https://github.com/tuusuario/his-bodega-frontendas.git
    cd his-bodega-frontendas
    `
@@ -129,7 +130,7 @@ La documentación interactiva está en http://localhost:8000/docs.
 
 ## Scripts útiles
 
-`ash
+`Bash
 # backend
 uvicorn main:app --reload
 
@@ -141,5 +142,7 @@ npm run build
 ## Notas finales
 
 - El backend usa SQLAlchemy y FastAPI; cualquier migración o ajuste de modelo se refleja en models.py.
-- El frontend usa React 18, vite y librerías como xios, echarts, lucide-react. Las dependencias están en equirements.txt y package.json.
+- El frontend usa React 18, vite y librerías como xios, 
+echarts, lucide-react. Las dependencias están en 
+equirements.txt y package.json.
 - Revisa README cada vez que actualices el flujo de instalación o dependencias para evitar divergencias.
