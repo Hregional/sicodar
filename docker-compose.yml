@@ -67,8 +67,8 @@ services:
       MYSQL_USER: root
       MYSQL_PASS: ${MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: ${MYSQL_DB}
-      # Programación en formato CRON (Todos los días a las 02:00 AM)
-      CRON_TIME: "21 13 * * *"
+      # Programación en formato CRON (Todos los días a las 04:00 AM)
+      CRON_TIME: "0 4 * * *"
       # Parámetros para un dump seguro en producción
       MYSQLDUMP_OPTS: "--single-transaction --quick --lock-tables=false"
       # Retención: Borra automáticamente archivos más viejos de 2 semanas
