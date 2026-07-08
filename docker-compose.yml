@@ -31,7 +31,7 @@ services:
       db:
         condition: service_healthy
     env_file:
-      - .env.docker
+      - .env
     environment:
       TZ: America/Guatemala
       MYSQL_HOST: db
